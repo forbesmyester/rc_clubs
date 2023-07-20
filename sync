@@ -1,0 +1,75 @@
+#!/bin/bash
+set -euo pipefail
+IFS=$'\n\t'
+
+# function parasol() {
+#     parallel -j 1 --halt now,fail=1 $@
+# }
+function parasol() {
+    parallel $@
+}
+export -f parasol
+
+function stream_event_heat_results() {
+
+    HTML_FILE="$(mktemp)"
+    JS_FILE="$(mktemp)"
+    JSON_FILE="$(mktemp)"
+
+    trap "rm $HTML_FILE; rm $JS_FILE; rm $JSON_FILE" RETURN
+    local SUBDOMAIN="$(echo $1 | awk '{ print $1 }')"
+    local EVENT_ID="$(echo $1 | awk '{ print $2 }')"
+    local HEAT_ID="$(echo $1 | awk '{ print $3 }')"
+    local RACE_RESULTS_ID="$(echo $1 | awk '{ print $4 }')"
+
+    curl -s  "https://"$SUBDOMAIN".liverc.com/results/?p=view_race_result&id=$RACE_RESULTS_ID" > "$HTML_FILE"
+    cat "$HTML_FILE" | ./pup 'script:contains("racerLaps") text{}'  | grep -v 'console\.log' > "$JS_FILE"
+    echo 'console.log(JSON.stringify({racerLaps,positionData,driverNames}))' >> "$JS_FILE"
+    node "$JS_FILE" > "$JSON_FILE"
+    RC_CLUB="$(cat "$HTML_FILE" | ./pup 'h1 text{}' | sed 's/^ *//' | sed 's/ *$//')"
+    RC_EVENT="$(cat "$HTML_FILE" | ./pup 'h3.page-header text{}' | sed 's/^ *//' | sed 's/ *$//')"
+    RC_DATE="$(cat "$HTML_FILE" | ./pup 'h5.page-header text{}' | sed 's/^ *//' | sed 's/ *$//')"
+    RC_RACE_NUM="$(cat "$HTML_FILE" | ./pup 'div.race_num text{}' | sed 's/^ *//' | sed 's/ *$//')"
+    RC_RACE_CLASS="$(cat "$HTML_FILE" | ./pup 'div.race_info span.class_header text{}' | sed 's/^ *//' | sed 's/ *$//')"
+    RC_TAGS_RAW="$(cat "$HTML_FILE" | ./pup 'div.race_info span.class_sub_header text{}' | sed 's/^ *//' | sed 's/ *$//')"
+    function get_tag() {
+        echo "$RC_TAGS_RAW" | grep "^$1:" |  awk -F ':' '{ print gensub(/^[^:]+: +/, "", "g", $0) }' | sed 's/^ *//' | sed 's/ *$//'
+    }
+    RC_ROUND="$(get_tag Round)"
+    RC_LENGTH="$(get_tag Length)"
+    RC_TAGS="$(echo "$RC_TAGS_RAW" | grep -v '^Round' | grep -v '^Length')"
+
+    mkdir -p "results/$SUBDOMAIN/$EVENT_ID/$HEAT_ID"
+    jo club="$RC_CLUB" event="$RC_EVENT" date="$RC_DATE" raceNum="$RC_RACE_NUM" raceClass="$RC_RACE_CLASS" length="$RC_LENGTH" round="$RC_ROUND" | jq --argfile driver_results "$JSON_FILE" '. as $meta | $meta + {"driver_results": $driver_results}' > "results/$SUBDOMAIN/$EVENT_ID/$HEAT_ID/${RACE_RESULTS_ID}.json"
+}
+export -f stream_event_heat_results
+
+function stream_event_heat_overview() {
+    local SUBDOMAIN="$(echo $1 | awk '{ print $1 }')"
+    local EVENT_ID="$(echo $1 | awk '{ print $2 }')"
+    local HEAT_ID="$(echo $1 | awk '{ print $3 }')"
+    curl -s "https://${SUBDOMAIN}.liverc.com/results/?p=view_heat_sheet&id=$HEAT_ID" | ./pup 'span.race_status a attr{href}' | awk -F '=' -v SD="$SUBDOMAIN" -v EVT="$EVENT_ID" -v HID="$HEAT_ID" '{ print SD, EVT, HID, $NF }'
+}
+export -f stream_event_heat_overview
+
+function stream_event_overview() {
+    local SUBDOMAIN="$1"
+    local EVENT_ID="$2"
+    curl -s "https://${SUBDOMAIN}.liverc.com/results/?p=view_event&id=$EVENT_ID" | ./pup 'table a attr{href}' | grep 'view_heat_sheet' | awk -F '=' -v SD="$SUBDOMAIN" -v EVT="$EVENT_ID" '{ print SD, EVT, $NF }'
+}
+export -f stream_event_overview
+
+function filter_by_dir() {
+    if [ -d "results/$1/$2" ]; then
+        exit
+    fi
+    echo "$2"
+}
+export -f filter_by_dir
+
+function club_detail() {
+    local SUBDOMAIN="$1"
+    curl -s "https://${SUBDOMAIN}.liverc.com/events/" | ./pup 'table#events tbody a attr{href}' | sed 's/.*=//'
+}
+
+club_detail "$1" | parasol filter_by_dir "$1" {} | parasol stream_event_overview "$1" {} | parasol stream_event_heat_overview | parasol stream_event_heat_results
