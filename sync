@@ -20,27 +20,29 @@ function stream_event_heat_results() {
     local SUBDOMAIN="$(echo $1 | awk '{ print $1 }')"
     local EVENT_ID="$(echo $1 | awk '{ print $2 }')"
     local HEAT_ID="$(echo $1 | awk '{ print $3 }')"
-    local RACE_RESULTS_ID="$(echo $1 | awk '{ print $4 }')"
+    local RACE_ID="$(echo $1 | awk '{ print $4 }')"
 
-    curl -s  "https://"$SUBDOMAIN".liverc.com/results/?p=view_race_result&id=$RACE_RESULTS_ID" > "$HTML_FILE"
+    curl -s  "https://"$SUBDOMAIN".liverc.com/results/?p=view_race_result&id=$RACE_ID" > "$HTML_FILE"
     cat "$HTML_FILE" | ./pup 'script:contains("racerLaps") text{}'  | grep -v 'console\.log' > "$JS_FILE"
     echo 'console.log(JSON.stringify({racerLaps,positionData,driverNames}))' >> "$JS_FILE"
     node "$JS_FILE" > "$JSON_FILE"
-    RC_CLUB="$(cat "$HTML_FILE" | ./pup 'h1 text{}' | sed 's/^ *//' | sed 's/ *$//')"
-    RC_EVENT="$(cat "$HTML_FILE" | ./pup 'h3.page-header text{}' | sed 's/^ *//' | sed 's/ *$//')"
-    RC_DATE="$(cat "$HTML_FILE" | ./pup 'h5.page-header text{}' | sed 's/^ *//' | sed 's/ *$//')"
-    RC_RACE_NUM="$(cat "$HTML_FILE" | ./pup 'div.race_num text{}' | sed 's/^ *//' | sed 's/ *$//')"
-    RC_RACE_CLASS="$(cat "$HTML_FILE" | ./pup 'div.race_info span.class_header text{}' | sed 's/^ *//' | sed 's/ *$//')"
-    RC_TAGS_RAW="$(cat "$HTML_FILE" | ./pup 'div.race_info span.class_sub_header text{}' | sed 's/^ *//' | sed 's/ *$//')"
+    local RC_CLUB="$(cat "$HTML_FILE" | ./pup 'h1 text{}' | sed 's/^ *//' | sed 's/ *$//')"
+    local RC_EVENT="$(cat "$HTML_FILE" | ./pup 'h3.page-header text{}' | sed 's/^ *//' | sed 's/ *$//')"
+    local RC_DATE="$(cat "$HTML_FILE" | ./pup 'h5.page-header text{}' | sed 's/^ *//' | sed 's/ *$//')"
+    local RC_YEAR_QUARTER="$(date --date="$RC_DATE" "+%Y-%q")"
+    local RC_RACE_NUM="$(cat "$HTML_FILE" | ./pup 'div.race_num text{}' | sed 's/^ *//' | sed 's/ *$//')"
+    local RC_RACE_CLASS="$(cat "$HTML_FILE" | ./pup 'div.race_info span.class_header text{}' | sed 's/^ *//' | sed 's/ *$//')"
+    local RC_TAGS_RAW="$(cat "$HTML_FILE" | ./pup 'div.race_info span.class_sub_header text{}' | sed 's/^ *//' | sed 's/ *$//')"
     function get_tag() {
         echo "$RC_TAGS_RAW" | grep "^$1:" |  awk -F ':' '{ print gensub(/^[^:]+: +/, "", "g", $0) }' | sed 's/^ *//' | sed 's/ *$//'
     }
-    RC_ROUND="$(get_tag Round)"
-    RC_LENGTH="$(get_tag Length)"
-    RC_TAGS="$(echo "$RC_TAGS_RAW" | grep -v '^Round' | grep -v '^Length')"
+    local RC_ROUND="$(get_tag Round)"
+    local RC_LENGTH="$(get_tag Length)"
+    local RC_TAGS="$(echo "$RC_TAGS_RAW" | grep -v '^Round' | grep -v '^Length')"
 
-    mkdir -p "results/$SUBDOMAIN/$EVENT_ID/$HEAT_ID"
-    jo club="$RC_CLUB" event="$RC_EVENT" date="$RC_DATE" raceNum="$RC_RACE_NUM" raceClass="$RC_RACE_CLASS" length="$RC_LENGTH" round="$RC_ROUND" | jq --argfile driver_results "$JSON_FILE" '. as $meta | $meta + {"driver_results": $driver_results}' > "results/$SUBDOMAIN/$EVENT_ID/$HEAT_ID/${RACE_RESULTS_ID}.json"
+    local RC_DIR="results/$SUBDOMAIN/$EVENT_ID/$RC_YEAR_QUARTER-${HEAT_ID}"
+    mkdir -p "$RC_DIR"
+    jo club="$RC_CLUB" event="$RC_EVENT" date="$RC_DATE" raceNum="$RC_RACE_NUM" raceClass="$RC_RACE_CLASS" length="$RC_LENGTH" round="$RC_ROUND" | jq --argfile driver_results "$JSON_FILE" '. as $meta | $meta + {"driver_results": $driver_results}' > "$RC_DIR/${RACE_ID}.json"
 }
 export -f stream_event_heat_results
 
@@ -72,4 +74,40 @@ function club_detail() {
     curl -s "https://${SUBDOMAIN}.liverc.com/events/" | ./pup 'table#events tbody a attr{href}' | sed 's/.*=//'
 }
 
+function build_large_file() {
+    local CURRENT_QUARTER="$( date +%Y-%q )"
+    local RACE_FILE="$(echo "$1" | sed 's/.* //')"
+    local FILE_NUMBER="$(echo "$1" | sed 's/ .*//')"
+    local EVENT_ID="$(basename "$(dirname "$(dirname "$RACE_FILE")" )" )"
+    local CLUB_ID="$(basename "$(dirname "$(dirname "$(dirname "$RACE_FILE")" )" )" )"
+    local HEAT_ID="$(basename "$(dirname "$RACE_FILE")" | sed 's/.*-//')"
+    local RACE_QUARTER="$(basename "$(dirname "$RACE_FILE")" | sed 's/-[0-9]\+$//')"
+    local RACE_ID="$(basename "$RACE_FILE" | sed 's/\..*//')"
+    local FILE_EXISTS=0
+    local CURRENT_QUARTER_MARKER=""
+    if [ "$CURRENT_QUARTER" = "$RACE_QUARTER" ]; then
+        CURRENT_QUARTER_MARKER="x"
+    fi
+    local OUTPUT_FILE="webroot/output/${CLUB_ID}/${RACE_QUARTER}${CURRENT_QUARTER_MARKER}.json"
+    if [ -f "$OUTPUT_FILE" ]; then
+        FILE_EXISTS=1
+    fi
+
+    mkdir -p "$( dirname "$OUTPUT_FILE" )"
+    if [ "$FILE_EXISTS" -eq 1 ]; then
+        echo -n ',' >> "$OUTPUT_FILE"
+    else
+        echo -n '[' >> "$OUTPUT_FILE"
+    fi
+    jo event_id="$EVENT_ID" heat_id="$HEAT_ID" race_id="$RACE_ID" | jq --argfile race_file "$RACE_FILE" '. as $meta | $meta + $race_file' >> "$OUTPUT_FILE"
+}
+export -f build_large_file
+
+
 club_detail "$1" | parasol filter_by_dir "$1" {} | parasol stream_event_overview "$1" {} | parasol stream_event_heat_overview | parasol stream_event_heat_results
+
+rm -rf webroot/output || true
+find results -type f | awk '{ print NR-1, $0 }' | parallel -j1 build_large_file
+find webroot/output -type f | parallel echo ']' '>>' {}
+find webroot/output -type f | parallel gzip
+
