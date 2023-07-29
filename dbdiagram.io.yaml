@@ -1,0 +1,62 @@
+// Use DBML to define your database structure
+// Docs: https://dbml.dbdiagram.io/docs
+
+Table driver {
+  driver_id integer [primary key]
+  driver_name varchar [not null]
+}
+
+Table club {
+  club_id integer [primary key]
+  club_name varchar [not null]
+  club_subdomian varchar [not null, unique]
+}
+
+Table event {
+  event_id integer [primary key]
+  event_name varchar [not null]
+  event_date date [not null]
+  club_id integer [not null]
+}
+
+Table heat {
+  heat_id integer [primary key]
+  event_id integer
+  heat_name varchar [not null]
+}
+
+Table race_class [note: 'raceClass without heat info'] {
+  race_class_id integer [primary key]
+  race_class_name varchar [not null]
+}
+
+Table race {
+  race_id integer [primary key]
+  race_number integer [not null]
+  race_logged_class_name varchar [not null]
+  race_length varchar [not null]
+  race_round varchar [not null]
+  race_class_id integer [not null]
+  heat_id integer [not null]
+}
+
+Table race_driver {
+  race_driver_id integer [primary key]
+  race_id integer [not null]
+  driver_id integer [not null]
+}
+
+Table race_driver_laps {
+  race_driver_id integer [not null]
+  race_driver_laps_lap_number integer [not null]
+  race_driver_laps_time_millisecond integer [not null]
+  race_driver_laps_position integer [not null]
+}
+
+Ref: race.race_class_id > race_class.race_class_id
+Ref: event.club_id > club.club_id
+Ref: race.heat_id > heat.heat_id
+Ref: heat.event_id > event.event_id
+Ref: race_driver.race_id > race.race_id
+Ref: race_driver.driver_id > driver.driver_id
+Ref: race_driver_laps.race_driver_id > race_driver.race_driver_id
