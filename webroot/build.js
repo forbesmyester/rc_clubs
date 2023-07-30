@@ -2,9 +2,9 @@ const sqlite3 = require('sqlite3').verbose();
 const fs = require('fs/promises');
 
 
-function getDatabase() {
+function getDatabase(club) {
     return new Promise((resolve, reject) => {
-        const db = new sqlite3.Database('rc.sqlite', (err) => {
+        const db = new sqlite3.Database('db/' + club + '.sqlite', (err) => {
             if (err) { return reject(err); }
             resolve(db);
         });
@@ -145,7 +145,7 @@ function getEventJSONRecord(clubId, race) {
         club_id: clubId,
         event_id: parseInt(race.event_id),
         event_name: race.event,
-        event_date: date.toISOString().replace('/T.*/', '')
+        event_date: date.toISOString().replace(/T.*/, '')
     }];
 }
 
@@ -253,7 +253,8 @@ function decrQuarter(quarter /* { year, quarter } */) {
 
 
 function getJSONLocal(filename) {
-    return fs.readFile("output/" + filename, { encoding: 'utf8' })
+    console.log(filename);
+    return fs.readFile("../output/" + filename, { encoding: 'utf8' })
         .then(content => JSON.parse(content));
 }
 
@@ -353,7 +354,7 @@ async function processQuarter(db, clubId, racesInQuarter) {
 }
 
 
-async function process(db, getJSON, clubDomain) {
+async function importIntoDb(db, getJSON, clubDomain) {
     await createSchema(db);
     await dbRun(db, 'INSERT INTO club (club_subdomain, club_name) VALUES (?, ?)', [clubDomain, clubDomain]);
     let clubId = await getClubId(db, clubDomain);
@@ -382,9 +383,10 @@ function isNodeJS() {
     return false;
 }
 
-getDatabase()
+let club = process.argv[process.argv.length - 1];
+getDatabase(club)
     .then((db) => {
-        return process(db, isNodeJS ? getJSONLocal : null, "YOUR_RC_CLUB_HERE");
+        return importIntoDb(db, isNodeJS ? getJSONLocal : null, club);
     })
     .then(async (db) => {
         let basic = `
