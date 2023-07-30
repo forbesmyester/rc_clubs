@@ -109,5 +109,5 @@ club_detail "$1" | parasol filter_by_dir "$1" {} | parasol stream_event_overview
 rm -rf webroot/output || true
 find results -type f | awk '{ print NR-1, $0 }' | parallel -j1 build_large_file
 find webroot/output -type f | parallel echo ']' '>>' {}
-find webroot/output -type f | parallel gzip
+# find webroot/output -type f | parallel gzip
 
