@@ -1,14 +1,82 @@
-<script src="https://unpkg.com/@antonz/sqlean/dist/sqlean.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<select id="club"></select>
-<select id="driver"></select>
-<select id="race_class"></select>
-<div id="chart_holder">
-  <p>
-    NOTE: After selecting club (first drop down, be patient, it downloads a (rather large) SQLite database, so it's not fast. When complete you'll get a list of drivers in the second drop down.
-  </p>
-</div>
-<div id="download"></div>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>RC Race Stats</title>
+  <!--<meta name="viewport" content="width=device-width,initial-scale=1" />-->
+  <meta name="description" content="" />
+  <link href="https://cdn.jsdelivr.net/npm/modern-normalize@v2.0.0
+/modern-normalize.min.css" rel="stylesheet">
+  <!--<link rel="icon" href="favicon.png">-->
+  <script src="https://unpkg.com/@antonz/sqlean/dist/sqlean.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { margin: 1em; }
+    .loading #loading-container { display: flex; }
+    .active-stage-1 #stage1 { font-weight: bold; }
+    .active-stage-1 #stage2 { display: none; }
+    .active-stage-1 #stage3 { display: none; }
+    .active-stage-2 #stage2 { font-weight: bold; }
+    .active-stage-2 #stage3 { display: none; }
+    .active-stage-3 #stage3 { font-weight: bold; }
+
+    .bottom-text { margin: 4em; }
+
+
+    .spinner {
+      width: 64px;
+      height: 64px;
+      border: 8px solid;
+      border-color: #3d5af1 transparent #3d5af1 transparent;
+      border-radius: 50%;
+      animation: spin-anim 1.2s linear infinite;
+    }
+
+    @keyframes spin-anim {
+      0% {
+        transform: rotate(0deg);
+      }
+      100% {
+        transform: rotate(360deg);
+      }
+    }
+
+    #loading-container {
+      width: 100%;
+      height: 100vh;
+      display: none;
+      justify-content: center;
+      align-items: center;
+      position: fixed;
+      background: #000;
+      z-index: 1;
+    }
+  </style>
+</head>
+<body>
+  <h1>RC Race Stats</h1>
+  <!--[if IE]><div style="width: 100%; position: fixed; z-index: 1000; bottom: 0; left: 0; background: lightgray;"><p>Outdated browser dectected. Please use a modern browser for a better browsing experience.</p><div onClick="parentNode.remove()">Close [X]</div></div><![endif]-->
+  <div id="input" class="loading">
+    <div id="loading-container">
+      <div class="spinner"></div>
+    </div>
+    <div id="stage1">
+      <p>First select your club: <select id="club"></select></p>
+    </div>
+    <div id="stage2">
+      <p>Then select a driver you want to view: <select id="driver"></select></p>
+    </div>
+    <div id="stage3">
+      <p>Then select a class they raced in: <select id="race_class"></select></p>
+    </div>
+  </div>
+  <div id="chart_holder">
+    <p class="bottom-text">
+      NOTE: After selecting club (first drop down, be patient, it downloads a (rather large) SQLite database, so it's not fast. When complete you'll get a list of drivers in the second drop down.
+    </p>
+  </div>
+  <div id="download" class="bottom-text"></div>
+</body>
 <script>
 
   (function() {
@@ -27,6 +95,8 @@
         option.innerText = club
         option.value = club
         document.getElementById('club').appendChild(option);
+        document.getElementById('input').classList.remove('loading');
+        document.getElementById('input').classList.add('active-stage-1');
       });
     });
 
@@ -73,6 +143,9 @@
 
 
   document.getElementById('club').addEventListener('change', function(event) {
+    document.getElementById('input').classList.add('loading');
+    document.getElementById('input').classList.add('active-stage-2');
+    document.getElementById('input').classList.remove('active-stage-1');
     let club = event.target.value;
     fetch('db/' + club)
       .then((response) => {
@@ -99,6 +172,7 @@
       .then((inDb) => db = inDb)
       .then(async () => {
         addDrivers(await dbAll(db, 'select * from driver order by driver_name', []));
+        document.getElementById('input').classList.remove('loading');
         return db;
       })
       .catch((e) => {
@@ -107,6 +181,9 @@
   });
 
   document.getElementById('driver').addEventListener('change', async function(event) {
+    document.getElementById('input').classList.add('loading');
+    document.getElementById('input').classList.add('active-stage-3');
+    document.getElementById('input').classList.remove('active-stage-2');
     let usedClassesSql = `
       select distinct race_class_name,race_class.race_class_id
       from race_driver
@@ -127,16 +204,18 @@
       option.value = cls.race_class_id;
       selectEl.appendChild(option);
     });
+    document.getElementById('input').classList.remove('loading');
   });
 
   document.getElementById('race_class').addEventListener('change', async function(event) {
+    document.getElementById('input').classList.add('loading');
     let results = await dbAll(
       db,
       fullSQL,
       [document.getElementById('driver').value, event.target.value]
     );
-    console.log(results);
     drawGraph(results);
+    document.getElementById('input').classList.remove('loading');
   });
 
 function drawGraph(results) {
@@ -391,3 +470,4 @@ let fullSQL = `
 
 
 </script>
+</html>
