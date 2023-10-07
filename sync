@@ -113,5 +113,5 @@ cd webroot
 rm -rf db || true
 mkdir db
 find ../output/ -mindepth 1 -type d | parallel basename | parallel node build.js {}
-find db | grep '\.sqlite$' | jo -a > db/index.json
+find db | grep '\.sqlite$' | parallel basename | jo -a > db/index.json
 

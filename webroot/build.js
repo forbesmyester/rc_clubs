@@ -253,7 +253,6 @@ function decrQuarter(quarter /* { year, quarter } */) {
 
 
 function getJSONLocal(filename) {
-    console.log(filename);
     return fs.readFile("../output/" + filename, { encoding: 'utf8' })
         .then(content => JSON.parse(content));
 }
