@@ -1,0 +1,89 @@
+let current_driver = (
+    from drivers
+    filter id == 579307
+)
+
+let identify_finals = (
+    from race
+    join race_class (race.race_class_id == race_class.race_class_id)
+    join heat (heat.heat_id == race.heat_id)
+    group heat.event_id (
+        derive { is_final = heat.heat_id == max heat.heat_id }
+    )
+    select {
+        race.race_class_id,
+        heat.event_id,
+        heat.heat_id,
+        is_final,
+        race.race_number,
+        race.race_id,
+        race.race_length,
+        race.race_logged_class_name
+    }
+    filter is_final == true
+    group {event_id, race_class_id} (
+        sort { -race_number }
+        derive { race_speed_rank = row_number this }
+    )
+    sort {-event_id, -race_class_id, -heat_id, -race_number}
+)
+
+let driver_laps = (
+    from race_driver
+    join race_driver_laps ( race_driver.race_driver_id == race_driver_laps.race_driver_id )
+    group {race_driver.race_driver_id} (
+        derive {
+            lap_count = max race_driver_laps.race_driver_laps_lap_number,
+            total_time = sum race_driver_laps.race_driver_laps_time_millisecond
+        }
+    )
+    select {
+        race_driver.race_id,
+        race_driver.driver_id,
+        lap_count,
+        total_time
+    }
+    group {
+        race_id,
+        driver_id,
+        lap_count,
+        total_time
+    } ( take 1 )
+    group { race_id } (
+        sort { -lap_count, total_time }
+        derive { pos = row_number this }
+    )
+    derive {
+        avg_lap_time = total_time / lap_count,
+        is_winner = ( pos == 1 )
+    }
+    select {pos, lap_count, total_time, avg_lap_time, race_id, driver_id, is_winner}
+    sort { -race_id, pos }
+)
+
+from driver_laps
+join identify_finals ( driver_laps.race_id == identify_finals.race_id )
+join race_class ( identify_finals.race_class_id == race_class.race_class_id )
+join event ( event.event_id == identify_finals.event_id )
+join driver ( driver.driver_id == driver_laps.driver_id )
+select {
+    event.event_date,
+    race_class.race_class_name,
+    race_logged_class_name,
+    identify_finals.race_speed_rank,
+    driver.driver_name,
+    driver_laps.pos,
+    total_time,
+    lap_count,
+    avg_lap_time,
+    event.event_id,
+    race_class.race_class_id,
+    driver.driver_id,
+    driver_laps.driver_id
+}
+sort {
+    -event_date,
+    -race_class_id,
+    race_speed_rank,
+    pos
+}
