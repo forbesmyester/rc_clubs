@@ -1,0 +1,53 @@
+#!/bin/bash
+set -euo pipefail
+IFS=$'\n\t'
+
+# function parasol() {
+#     parallel -j 1 --halt now,fail=1 $@
+# }
+function parasol() {
+    parallel $@
+}
+export -f parasol
+
+
+function club_detail_page() {
+    local VENUE_ID="$1"
+    local PAGE="$2"
+    OUT="$(curl -s "https://www.rc-results.com/viewer/Main/VenueMeetings?venueId=${VENUE_ID}&page=$PAGE")"
+    echo "$OUT" | pup 'table tbody a attr{href}' | sed 's/.*=//'
+    PAGE="$(echo "$OUT" | pup 'table tfoot a attr{href}' | sed 's/.*=//' | awk -v PAGE="$PAGE" '{ if ($1 > PAGE) { print $1 } }' | head -n1)"
+    if [ -n "$PAGE" ]; then
+        club_detail_page "$VENUE_ID" "$PAGE"
+    fi
+}
+
+
+function club_detail() {
+    local VENUE_ID="$1"
+    club_detail_page "$VENUE_ID" 1
+}
+
+
+function filter_by_dir() {
+    if [ -d "rc-results/$1/$2" ]; then
+        exit
+    fi
+    echo "$2"
+}
+export -f filter_by_dir
+
+
+function stream_event_overview() {
+    local VENUE_ID="$1"
+    local MEETING_ID="$2"
+    curl -s "https://www.rc-results.com/viewer/Main/MeetingSummary?meetingId=${MEETING_ID}" # | ./pup 'table a attr{href}' | grep 'view_heat_sheet' | awk -F '=' -v SD="$SUBDOMAIN" -v EVT="$EVENT_ID" '{ print SD, EVT, $NF }'
+}
+export -f stream_event_overview
+
+
+# https://www.rc-results.com/viewer/Main/MeetingSummary?meetingId=9937
+
+# club_detail 1093 | parasol filter_by_dir 1093 | stream_event_overview 1093 9937
+stream_event_overview 1093 9937
+
