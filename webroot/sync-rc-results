@@ -14,7 +14,7 @@ export -f parasol
 function club_detail_page() {
     local VENUE_ID="$1"
     local PAGE="$2"
-    OUT="$(curl -s "https://www.rc-results.com/viewer/Main/VenueMeetings?venueId=${VENUE_ID}&page=$PAGE")"
+    local OUT="$(curl -s "https://www.rc-results.com/viewer/Main/VenueMeetings?venueId=${VENUE_ID}&page=$PAGE")"
     echo "$OUT" | pup 'table tbody a attr{href}' | sed 's/.*=//'
     PAGE="$(echo "$OUT" | pup 'table tfoot a attr{href}' | sed 's/.*=//' | awk -v PAGE="$PAGE" '{ if ($1 > PAGE) { print $1 } }' | head -n1)"
     if [ -n "$PAGE" ]; then
@@ -41,13 +41,58 @@ export -f filter_by_dir
 function stream_event_overview() {
     local VENUE_ID="$1"
     local MEETING_ID="$2"
-    curl -s "https://www.rc-results.com/viewer/Main/MeetingSummary?meetingId=${MEETING_ID}" # | ./pup 'table a attr{href}' | grep 'view_heat_sheet' | awk -F '=' -v SD="$SUBDOMAIN" -v EVT="$EVENT_ID" '{ print SD, EVT, $NF }'
+    curl -s "https://www.rc-results.com/viewer/Main/MeetingSummary?meetingId=${MEETING_ID}" | pup 'div.container a attr{href}' | grep 'RaceResult' | awk -F '=' -v SD="$VENUE_ID" -v EVT="$MEETING_ID" '{ print SD, EVT, $NF }'
 }
 export -f stream_event_overview
+
+function html_table_as_json() {
+    echo "$2" | pup "$1" | pup 'tr json{}' | mlr --json put '
+        begin { @headers = []; }
+        func x(direct, tag) {
+            if (haskey(tag, "children")) {
+                if (haskey(tag, "text")) { direct = tag["text"]; }
+                t = fold(tag["children"], func (acc, item) { return acc . x("", item); }, direct);
+                return t;
+            }
+            return tag["text"];
+        }
+        out = apply($children, func (item) { return x("", item); });
+        $out = {};
+        if (NR == 1) {
+            @headers = out;
+        }
+        else {
+            for (i = 1; i < length(out); i += 1) {
+                if (i < length(@headers)) {
+                    $out[@headers[i]] = out[i];
+                }
+            }
+        }
+
+    ' then filter 'NR != 1' | jq -c '.[].out'
+}
+
+function stream_event_heat_overview() {
+    local VENUE_ID="$1"
+    local MEETING_ID="$2"
+    local RACE_ID="$3"
+    local OUT="$(curl "https://www.rc-results.com/viewer/Main/RaceResult?raceId=$RACE_ID")"
+    local VENUE="$(echo "$OUT" | pup 'a[href^="/viewer/Main/VenueMeetings?venueId=1093"]' | pup a text{} | awk '/[A-Z0-9]/ { print $0 }')"
+    local MEETING="$(echo "$OUT" | pup 'a[href^="/viewer/Main/MeetingSummary?meetingId="]' | pup 'a text{}' | awk '/[A-Z0-9]/ { print $0 }')"
+    local HEAT_NAME="$(echo "$OUT" | pup h3 text{} | awk 'NR == 1 { print $0 }')"
+    local RACE_NAME="$(echo "$OUT" | pup h3 text{} | awk 'NR == 2 { print $0 }')"
+    local TABLE="$(html_table_as_json "table" "$OUT")"
+    echo "$VENUE"
+    echo "$MEETING"
+    echo "$RACE_NAME"
+    echo "$HEAT_NAME"
+    echo "$TABLE"
+}
 
 
 # https://www.rc-results.com/viewer/Main/MeetingSummary?meetingId=9937
 
 # club_detail 1093 | parasol filter_by_dir 1093 | stream_event_overview 1093 9937
 stream_event_overview 1093 9937
+stream_event_heat_overview 1093 9937 188101
 
