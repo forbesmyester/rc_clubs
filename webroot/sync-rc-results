@@ -45,33 +45,6 @@ function stream_event_overview() {
 }
 export -f stream_event_overview
 
-function html_table_as_json() {
-    echo "$2" | pup "$1" | pup 'tr json{}' | mlr --json put '
-        begin { @headers = []; }
-        func x(direct, tag) {
-            if (haskey(tag, "children")) {
-                if (haskey(tag, "text")) { direct = tag["text"]; }
-                t = fold(tag["children"], func (acc, item) { return acc . x("", item); }, direct);
-                return t;
-            }
-            return tag["text"];
-        }
-        out = apply($children, func (item) { return x("", item); });
-        $out = {};
-        if (NR == 1) {
-            @headers = out;
-        }
-        else {
-            for (i = 1; i < length(out); i += 1) {
-                if (i < length(@headers)) {
-                    $out[@headers[i]] = out[i];
-                }
-            }
-        }
-
-    ' then filter 'NR != 1' | jq -c '.[].out'
-}
-
 function stream_event_heat_overview() {
     local VENUE_ID="$1"
     local MEETING_ID="$2"
@@ -81,18 +54,35 @@ function stream_event_heat_overview() {
     local MEETING="$(echo "$OUT" | pup 'a[href^="/viewer/Main/MeetingSummary?meetingId="]' | pup 'a text{}' | awk '/[A-Z0-9]/ { print $0 }')"
     local HEAT_NAME="$(echo "$OUT" | pup h3 text{} | awk 'NR == 1 { print $0 }')"
     local RACE_NAME="$(echo "$OUT" | pup h3 text{} | awk 'NR == 2 { print $0 }')"
-    local TABLE="$(html_table_as_json "table" "$OUT")"
+    local TABLE="$(echo "$OUT" | pup "table" | html-table-as-json)"
+    local DRIVER_IDS="$(echo "$OUT" | pup 'table a attr{href}' | awk -F '=' -v SD="$VENUE_ID" -v EVT="$MEETING_ID" -v RC="$RACE_ID" '{ print SD, EVT, RC, $NF }')"
     echo "$VENUE"
     echo "$MEETING"
     echo "$RACE_NAME"
     echo "$HEAT_NAME"
     echo "$TABLE"
+    echo "$DRIVER_IDS"
+}
+
+
+function stream_event_heat_results() {
+    local VENUE_ID="$1"
+    local MEETING_ID="$2"
+    local RACE_ID="$3"
+    local DRIVER_ID="$4"
+    # local OUT="$(curl "https://www.rc-results.com/viewer/Main/DriverResult?raceId=${RACE_ID}&driverId=${DRIVER_ID}")"
+    local OUT="$(cat ./individual.html)"
+    local OVERVIEW="$(echo "$OUT" | pup table.table-condensed | html-table-as-json -k)"
+    echo "$OVERVIEW"
+    local LAPS="$(echo "$OUT" | pup table.table-ultra-condensed | html-table-as-json -k)"
+    echo "$LAPS"
 }
 
 
 # https://www.rc-results.com/viewer/Main/MeetingSummary?meetingId=9937
 
 # club_detail 1093 | parasol filter_by_dir 1093 | stream_event_overview 1093 9937
-stream_event_overview 1093 9937
-stream_event_heat_overview 1093 9937 188101
+# stream_event_overview 1093 9937
+# stream_event_heat_overview 1093 9937 188101
+stream_event_heat_results 1093 9937 188101 225016
 

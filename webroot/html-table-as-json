@@ -1,0 +1,78 @@
+#!/bin/bash
+set -euo pipefail
+IFS=$'\n\t'
+
+show_help() {
+    echo "$1"
+    echo ""
+    echo "-k Key Value data"
+    echo ""
+    exit 0
+}
+
+KV=0
+
+while getopts "hk" opt; do
+    case "$opt" in
+        h)
+            show_help
+            exit 0
+            ;;
+        k)
+            KV=1
+            ;;
+    esac
+done
+shift $(( OPTIND - 1 ))
+
+cat /dev/stdin | pup 'tr json{}' | mlr --json put -s KV="$KV" '
+    begin {
+        @headers = [];
+        @kv = {};
+    }
+
+    func recurse_for_text(direct, tag) {
+        if (haskey(tag, "children")) {
+            if (haskey(tag, "text")) { direct = tag["text"]; }
+            t = fold(tag["children"], func (acc, item) { return acc . recurse_for_text("", item); }, direct);
+            return t;
+        }
+        return tag["text"];
+    }
+
+    func organize_standard(headers, tr) {
+        row = apply(tr.children, func (item) { return recurse_for_text("", item); });
+        if (length(headers) == 0) {
+            return { "headers": row };
+        }
+        data = {};
+        for (i = 0; i <= length(row); i += 1) {
+            if (i <= length(headers)) {
+                data[headers[i]] = row[i];
+            }
+        }
+        return { "headers": headers, "data": data };
+    }
+
+    func organize_longitudinal(tr) {
+        row = apply(tr.children, func (item) { return recurse_for_text("", item); });
+        return row;
+    }
+
+    if (@KV == 1) {
+        res = organize_longitudinal($*);
+        @kv[res[1]] = res[2];
+    } else {
+        res = organize_standard(@headers, $*);
+        @headers = res.headers;
+        $out = res.data;
+        $l = @KV;
+    }
+
+    end { if (@KV == 1) {
+        emit1({ "out": @kv });
+    } }
+
+
+
+' then filter 'haskey($*, "out")' then put '$*= $out'
