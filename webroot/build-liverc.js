@@ -1,136 +1,15 @@
-const sqlite3 = require('sqlite3').verbose();
+const {
+    getDatabase,
+    dbRunStatement,
+    dbFinalizeStatement,
+    getCurrentQuarter,
+    stringMillis,
+    dbRun,
+    genericInsert,
+    dbAll,
+    isNodeJS,
+    createSchema } = require('./lib.js');
 const fs = require('fs/promises');
-
-
-function getDatabase(club) {
-    return new Promise((resolve, reject) => {
-        const db = new sqlite3.Database('db/' + club + '.sqlite', (err) => {
-            if (err) { return reject(err); }
-            resolve(db);
-        });
-    });
-}
-
-
-function dbRunStatement(stmt, values) {
-    return new Promise((resolve, reject) => {
-        stmt.run(values, function (err, res) {
-            if (err) {
-                return reject(err);
-            }
-            resolve(this);
-        });
-    });
-}
-
-
-function dbFinalizeStatement(stmt, values) {
-    return new Promise((resolve, reject) => {
-        stmt.finalize(function (err, res) {
-            if (err) { return reject(err); }
-            resolve(res);
-        });
-    });
-}
-
-
-function dbRun(db, stmt, values) {
-    return new Promise((resolve, reject) => {
-        db.run(stmt, values, function (err, res) {
-            if (err) {
-                return reject(err);
-            }
-            resolve(this);
-        });
-    });
-}
-
-
-async function createSchema(db) {
-
-    let statements = [
-        [
-            'CREATE TABLE "driver" (',
-            '    "driver_id" INTEGER PRIMARY KEY,',
-            '    "driver_name" TEXT NOT NULL',
-            ') STRICT'
-        ].join("\n"),
-
-        [
-            'CREATE TABLE "club" (',
-            '    "club_id" INTEGER PRIMARY KEY,',
-            '    "club_name" TEXT NOT NULL,',
-            '    "club_subdomain" TEXT UNIQUE NOT NULL',
-            ') STRICT'
-        ].join("\n"),
-
-        [
-            'CREATE TABLE "event" (',
-            '    "event_id" INTEGER PRIMARY KEY,',
-            '    "event_name" TEXT NOT NULL,',
-            '    "event_date" TEXT NOT NULL,',
-            '    "club_id" INTEGER NOT NULL',
-            ') STRICT'
-        ].join("\n"),
-
-        [
-            'CREATE TABLE "heat" (',
-            '    "heat_id" INTEGER PRIMARY KEY,',
-            '    "event_id" INTEGER,',
-            '    "heat_name" TEXT NOT NULL',
-            ') STRICT'
-        ].join("\n"),
-
-        [
-            'CREATE TABLE "race_class" (',
-            '    "race_class_id" INTEGER PRIMARY KEY,',
-            '    "race_class_name" TEXT UNIQUE NOT NULL',
-            ') STRICT'
-        ].join("\n"),
-
-        [
-            'CREATE TABLE "race" (',
-            '    "race_id" INTEGER PRIMARY KEY,',
-            '    "race_number" INTEGER NOT NULL,',
-            '    "race_logged_class_name" TEXT NOT NULL,',
-            '    "race_length" TEXT NOT NULL,',
-            '    "race_round" TEXT NOT NULL,',
-            '    "race_class_id" INTEGER NOT NULL,',
-            '    "heat_id" INTEGER NOT NULL',
-            ') STRICT'
-        ].join("\n"),
-
-        [
-            'CREATE TABLE "race_driver" (',
-            '    "race_driver_id" INTEGER PRIMARY KEY,',
-            '    "race_id" INTEGER NOT NULL,',
-            '    "driver_id" INTEGER NOT NULL',
-            ') STRICT'
-        ].join("\n"),
-
-        [
-            'CREATE TABLE "race_driver_laps" (',
-            '    "race_driver_id" INTEGER NOT NULL,',
-            '    "race_driver_laps_lap_number" INTEGER NOT NULL,',
-            '    "race_driver_laps_time_millisecond" INTEGER NOT NULL,',
-            '    "race_driver_laps_position" INTEGER NOT NULL',
-            ') STRICT'
-        ].join("\n"),
-
-        [
-            'CREATE UNIQUE INDEX "uq_race_driver" ON',
-            'race_driver (race_id, driver_id)'
-        ].join("\n"),
-    ];
-
-    for (const stmt of statements) {
-        await dbRun(db, stmt, []);
-    }
-
-    return true;
-
-}
-
 
 function getRacerLaps(race) {
     return (race?.driver_results?.racerLaps || []);
@@ -147,21 +26,6 @@ function getEventJSONRecord(clubId, race) {
         event_name: race.event,
         event_date: date.toISOString().replace(/T.*/, '')
     }];
-}
-
-
-function stringMillis(str) {
-    while (true) {
-        if (str.indexOf('.') == -1) {
-            str = str + '.';
-        }
-        if (str.replace(/.*\./, '').length >= 3) {
-            let res = str.match(/(.*)\.([0-9][0-9][0-9])/);
-            return parseInt("" + res[1] + res[2]);
-        }
-        str = str + '0';
-    }
-    return parseInt(str);
 }
 
 
@@ -236,14 +100,6 @@ function getDriverJSONRecord(race) {
 }
 
 
-function getCurrentQuarter() {
-    const currentDate = new Date();
-    const quarter = Math.floor(currentDate.getMonth()/3) + 1;
-    const year = currentDate.getFullYear();
-    return { quarter, year };
-}
-
-
 function decrQuarter(quarter /* { year, quarter } */) {
     if (quarter.quarter == 1) {
         return { year: quarter.year - 1, quarter: 4 };
@@ -260,26 +116,6 @@ function getJSONLocal(filename) {
 
 function buildFilename(clubName, { quarter, year }, currentMarker) {
     return clubName + "/" + year + "-" + quarter + currentMarker + ".json";
-}
-
-
-async function genericInsert(db, tablename, records) {
-    if (records.length == 0) {
-        return;
-    }
-    let keys = Object.keys(records[0]);
-    let sqlTableColumn = keys.map((k) => k.replace(/[^a-z0-9_]/g, ''));
-    let sqlQuestionMarks = keys.map((k) => '?');
-    let sql = `
-        INSERT OR IGNORE INTO ${tablename} (${sqlTableColumn.join(', ')})
-            VALUES (${sqlQuestionMarks.join(', ')})`;
-    const stmt = db.prepare(sql);
-    for (const record of records) {
-        let values = keys.map((k) => record[k]);
-        await dbRunStatement(stmt, values);
-    }
-    dbFinalizeStatement(stmt);
-    return db;
 }
 
 
@@ -303,16 +139,6 @@ async function insertRaceDriverLaps(db, records) {
     }
     dbFinalizeStatement(stmt);
     return db;
-}
-
-
-function dbAll(db, select, values) {
-    return new Promise((resolve, reject) => {
-        db.all(select, values, function(err, res) {
-            if (err) { return reject(err); }
-            resolve(res);
-        });
-    });
 }
 
 
@@ -355,7 +181,7 @@ async function processQuarter(db, clubId, racesInQuarter) {
 
 async function importIntoDb(db, getJSON, clubDomain) {
     await createSchema(db);
-    await dbRun(db, 'INSERT INTO club (club_subdomain, club_name) VALUES (?, ?)', [clubDomain, clubDomain]);
+    await dbRun(db, 'INSERT INTO club (club_subdomain, club_name) VALUES (?, ?) ON CONFLICT DO NOTHING', [clubDomain, clubName]);
     let clubId = await getClubId(db, clubDomain);
     let quarter = getCurrentQuarter();
     let currentMarker = 'x';
@@ -375,12 +201,6 @@ async function importIntoDb(db, getJSON, clubDomain) {
     return db;
 }
 
-function isNodeJS() {
-    if (typeof window === 'undefined') {
-        return true;
-    }
-    return false;
-}
 
 let club = process.argv[process.argv.length - 1];
 getDatabase(club)

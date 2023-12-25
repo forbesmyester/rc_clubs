@@ -20,6 +20,10 @@ function club_detail_page() {
     if [ -n "$PAGE" ]; then
         club_detail_page "$VENUE_ID" "$PAGE"
     fi
+    mkdir -p "rc-results/$1"
+    if [ ! -f "rc-results/$1/NAME" ]; then
+        echo $OUT | pup 'h3 text{}' > "rc-results/$1/NAME"
+    fi
 }
 
 
@@ -33,56 +37,88 @@ function filter_by_dir() {
     if [ -d "rc-results/$1/$2" ]; then
         exit
     fi
-    echo "$2"
+    echo "$1 $2"
 }
 export -f filter_by_dir
 
 
 function stream_event_overview() {
-    local VENUE_ID="$1"
-    local MEETING_ID="$2"
-    curl -s "https://www.rc-results.com/viewer/Main/MeetingSummary?meetingId=${MEETING_ID}" | pup 'div.container a attr{href}' | grep 'RaceResult' | awk -F '=' -v SD="$VENUE_ID" -v EVT="$MEETING_ID" '{ print SD, EVT, $NF }'
+    local VENUE_ID="$(echo $1 | awk '{ print $1 }')"
+    local MEETING_ID="$(echo $1 | awk '{ print $2 }')"
+    local OUT="$(curl -s "https://www.rc-results.com/viewer/Main/MeetingSummary?meetingId=${MEETING_ID}")"
+    echo "$OUT" | ./pup 'a attr{href}' | grep 'RaceResult' | awk -F '=' -v SD="$VENUE_ID" -v EVT="$MEETING_ID" '{ print SD, EVT, $NF }'
+    mkdir -p "rc-results/$VENUE_ID/$MEETING_ID"
+    local NAME="$(echo "$OUT" | pup h3 text{} | sed 's/[^\]*\- *//')"
+    local DATE="$(echo "$OUT" | pup h3 text{} | sed 's#^\([0-9/\-]*\).*#\1#')"
+    echo "Name=$NAME" > "rc-results/$VENUE_ID/$MEETING_ID/META"
+    echo "Date=$DATE" >> "rc-results/$VENUE_ID/$MEETING_ID/META"
 }
 export -f stream_event_overview
 
+function mytrim() {
+    cat /dev/stdin | sed 's/ *$//' | sed 's/^ *//'
+}
+export -f mytrim
+
+function uk_to_us_date() {
+    cat /dev/stdin | sed 's_\(.*\)/\(.*\)/\(.*\)_\2/\1/\3_'
+}
+export -f uk_to_us_date
+
+
 function stream_event_heat_overview() {
-    local VENUE_ID="$1"
-    local MEETING_ID="$2"
-    local RACE_ID="$3"
+    local VENUE_ID="$(echo $1 | awk '{ print $1 }')"
+    local MEETING_ID="$(echo $1 | awk '{ print $2 }')"
+    local RACE_ID="$(echo $1 | awk '{ print $3 }')"
     local OUT="$(curl "https://www.rc-results.com/viewer/Main/RaceResult?raceId=$RACE_ID")"
-    local VENUE="$(echo "$OUT" | pup 'a[href^="/viewer/Main/VenueMeetings?venueId=1093"]' | pup a text{} | awk '/[A-Z0-9]/ { print $0 }')"
-    local MEETING="$(echo "$OUT" | pup 'a[href^="/viewer/Main/MeetingSummary?meetingId="]' | pup 'a text{}' | awk '/[A-Z0-9]/ { print $0 }')"
-    local HEAT_NAME="$(echo "$OUT" | pup h3 text{} | awk 'NR == 1 { print $0 }')"
-    local RACE_NAME="$(echo "$OUT" | pup h3 text{} | awk 'NR == 2 { print $0 }')"
     local TABLE="$(echo "$OUT" | pup "table" | html-table-as-json)"
     local DRIVER_IDS="$(echo "$OUT" | pup 'table a attr{href}' | awk -F '=' -v SD="$VENUE_ID" -v EVT="$MEETING_ID" -v RC="$RACE_ID" '{ print SD, EVT, RC, $NF }')"
-    echo "$VENUE"
-    echo "$MEETING"
-    echo "$RACE_NAME"
-    echo "$HEAT_NAME"
-    echo "$TABLE"
+    DESTDIR="rc-results/$VENUE_ID/$MEETING_ID/$RACE_ID"
+    mkdir -p "$DESTDIR"
+    echo "$TABLE" > $DESTDIR/overview.json
     echo "$DRIVER_IDS"
 }
-
+export -f stream_event_heat_overview
+ 
 
 function stream_event_heat_results() {
-    local VENUE_ID="$1"
-    local MEETING_ID="$2"
-    local RACE_ID="$3"
-    local DRIVER_ID="$4"
-    # local OUT="$(curl "https://www.rc-results.com/viewer/Main/DriverResult?raceId=${RACE_ID}&driverId=${DRIVER_ID}")"
-    local OUT="$(cat ./individual.html)"
-    local OVERVIEW="$(echo "$OUT" | pup table.table-condensed | html-table-as-json -k)"
-    echo "$OVERVIEW"
-    local LAPS="$(echo "$OUT" | pup table.table-ultra-condensed | html-table-as-json -k)"
-    echo "$LAPS"
-}
+    local VENUE_ID="$(echo $1 | awk '{ print $1 }')"
+    local MEETING_ID="$(echo $1 | awk '{ print $2 }')"
+    local RACE_ID="$(echo $1 | awk '{ print $3 }')"
+    local DRIVER_ID="$(echo $1 | awk '{ print $4 }')"
+    echo $1 >> rc-results/$VENUE_ID/expected
+    local OUT="$(curl "https://www.rc-results.com/viewer/Main/DriverResult?raceId=${RACE_ID}&driverId=${DRIVER_ID}")"
+    # echo "$OUT" > ./individual.html
+    # local OUT="$(cat ./individual.html)"
+    local VENUE="$(echo "$OUT" | pup 'a[href^="/viewer/Main/VenueMeetings?venueId=1093"]' | pup a text{} | awk '/[A-Z0-9]/ { print $0 }' | mytrim)"
+    local MEETING="$(echo "$OUT" | pup 'a[href^="/viewer/Main/MeetingSummary?meetingId="]' | pup 'a text{}' | awk '/[A-Z0-9]/ { print $0 }' | mytrim)"
+    local HEAT_NAME="$(echo "$OUT" | pup h3 text{} | awk 'NR == 1 { print $0 }')"
+    local HEAT_DESC_2="$(echo "$OUT" | pup h3 text{} | awk 'NR == 2 { print $0 }')"
+    local US_DATE="$( echo $MEETING | sed 's/ .*//' | uk_to_us_date)"
+    local RC_YEAR_QUARTER="$(date --date="$US_DATE" "+%Y-%q")"
+    local ISODATE="$(date -I --date="$US_DATE")"
+    local RACE_NUMBER="$(echo "$HEAT_DESC_2" | awk -F ' - ' '{print $1}' | mytrim)"
+    local RACE_CLASS="$(echo "$HEAT_DESC_2" | awk -F ' - ' '{print $2}' | mytrim)"
+    local RACE_NAME="$(echo "$HEAT_DESC_2" | sed 's/[^\-]*-//' | mytrim)"
 
+    local EVTMETA="$(jo "venue=$VENUE" "meeting=$MEETING" "isodate=$ISODATE" "heat_name=$HEAT_NAME" "race_number=$RACE_NUMBER" "race_class=$RACE_CLASS" "race_name=$RACE_NAME" "rc_year_quarter=$RC_YEAR_QUARTER" "race_name=$RACE_NAME" "heat_name=$HEAT_NAME" | jq '{"race_meta":.}')"
+
+    local OVERVIEW="$(echo "$OUT" | pup table.table-condensed | html-table-as-json -k | jq .[] | jq '{"driver_meta":.}')"
+    local LAPS="$(echo "$OUT" | pup table.table-ultra-condensed | html-table-as-json -k | jq .[] | jq '{"laps":.}')"
+    local OUT="$(echo $LAPS | jq '. + '"$OVERVIEW"' + '"$EVTMETA")"
+    DESTDIR="rc-results/$VENUE_ID/$MEETING_ID/$RACE_ID"
+    mkdir -p "$DESTDIR"
+    echo $OUT | jq . > $DESTDIR/${DRIVER_ID}.json
+}
+export -f stream_event_heat_results
 
 # https://www.rc-results.com/viewer/Main/MeetingSummary?meetingId=9937
 
-# club_detail 1093 | parasol filter_by_dir 1093 | stream_event_overview 1093 9937
-# stream_event_overview 1093 9937
-# stream_event_heat_overview 1093 9937 188101
-stream_event_heat_results 1093 9937 188101 225016
+# club_detail 1093 | parasol filter_by_dir 1093 {} | parallel -j 1 stream_event_overview | parallel -j 1 stream_event_heat_overview | parallel -j 1 stream_event_heat_results
 
+
+# 1093 9937 | stream_event_heat_overview 1093 9937 188101
+# stream_event_overview "1093 9937" | parallel stream_event_heat_overview
+stream_event_heat_overview "1093 9937 188101" | parallel -j 1 stream_event_heat_results
+echo 'Southlakes MCC' > rc-results/1093/NAME
+# stream_event_heat_results "1093 9937 188101 225016"
