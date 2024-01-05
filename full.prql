@@ -61,6 +61,7 @@ let driver_laps = (
     sort { -race_id, pos }
 )
 
+/*
 from driver_laps
 join identify_finals ( driver_laps.race_id == identify_finals.race_id )
 join race_class ( identify_finals.race_class_id == race_class.race_class_id )
@@ -87,3 +88,4 @@ sort {
     race_speed_rank,
     pos
 }
+*/

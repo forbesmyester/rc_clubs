@@ -80,76 +80,82 @@ function dbRun(db, stmt, values) {
 }
 
 
+let createTables = [
+    [
+        'CREATE TABLE "driver" (',
+        '    "driver_id" INTEGER PRIMARY KEY,',
+        '    "driver_name" TEXT NOT NULL',
+        ') STRICT'
+    ].join("\n"),
+
+    [
+        'CREATE TABLE "club" (',
+        '    "club_id" INTEGER PRIMARY KEY,',
+        '    "club_name" TEXT NOT NULL,',
+        '    "club_subdomain" TEXT UNIQUE NOT NULL',
+        ') STRICT'
+    ].join("\n"),
+
+    [
+        'CREATE TABLE "event" (',
+        '    "event_id" INTEGER PRIMARY KEY,',
+        '    "event_name" TEXT NOT NULL,',
+        '    "event_date" TEXT NOT NULL,',
+        '    "club_id" INTEGER NOT NULL',
+        ') STRICT'
+    ].join("\n"),
+
+    [
+        'CREATE TABLE "heat" (',
+        '    "heat_id" INTEGER PRIMARY KEY,',
+        '    "event_id" INTEGER,',
+        '    "heat_name" TEXT NOT NULL',
+        ') STRICT'
+    ].join("\n"),
+
+    [
+        'CREATE TABLE "race_class" (',
+        '    "race_class_id" INTEGER PRIMARY KEY,',
+        '    "race_class_name" TEXT UNIQUE NOT NULL',
+        ') STRICT'
+    ].join("\n"),
+
+    [
+        'CREATE TABLE "race" (',
+        '    "race_id" INTEGER PRIMARY KEY,',
+        '    "race_number" INTEGER NOT NULL,',
+        '    "race_logged_class_name" TEXT NOT NULL,',
+        '    "race_length" TEXT,',
+        '    "race_round" TEXT NOT NULL,',
+        '    "race_class_id" INTEGER NOT NULL,',
+        '    "heat_id" INTEGER NOT NULL',
+        ') STRICT'
+    ].join("\n"),
+
+    [
+        'CREATE TABLE "race_driver" (',
+        '    "race_driver_id" INTEGER PRIMARY KEY,',
+        '    "race_id" INTEGER NOT NULL,',
+        '    "driver_id" INTEGER NOT NULL',
+        ') STRICT'
+    ].join("\n"),
+
+    [
+        'CREATE TABLE "race_driver_laps" (',
+        '    "race_driver_id" INTEGER NOT NULL,',
+        '    "race_driver_laps_lap_number" INTEGER NOT NULL,',
+        '    "race_driver_laps_time_millisecond" INTEGER NOT NULL,',
+        '    "race_driver_laps_position" INTEGER',
+        ') STRICT'
+    ].join("\n"),
+];
+
+
 async function createSchema(db) {
 
     let statements = [
-        [
-            'CREATE TABLE "driver" (',
-            '    "driver_id" INTEGER PRIMARY KEY,',
-            '    "driver_name" TEXT NOT NULL',
-            ') STRICT'
-        ].join("\n"),
 
-        [
-            'CREATE TABLE "club" (',
-            '    "club_id" INTEGER PRIMARY KEY,',
-            '    "club_name" TEXT NOT NULL,',
-            '    "club_subdomain" TEXT UNIQUE NOT NULL',
-            ') STRICT'
-        ].join("\n"),
-
-        [
-            'CREATE TABLE "event" (',
-            '    "event_id" INTEGER PRIMARY KEY,',
-            '    "event_name" TEXT NOT NULL,',
-            '    "event_date" TEXT NOT NULL,',
-            '    "club_id" INTEGER NOT NULL',
-            ') STRICT'
-        ].join("\n"),
-
-        [
-            'CREATE TABLE "heat" (',
-            '    "heat_id" INTEGER PRIMARY KEY,',
-            '    "event_id" INTEGER,',
-            '    "heat_name" TEXT NOT NULL',
-            ') STRICT'
-        ].join("\n"),
-
-        [
-            'CREATE TABLE "race_class" (',
-            '    "race_class_id" INTEGER PRIMARY KEY,',
-            '    "race_class_name" TEXT UNIQUE NOT NULL',
-            ') STRICT'
-        ].join("\n"),
-
-        [
-            'CREATE TABLE "race" (',
-            '    "race_id" INTEGER PRIMARY KEY,',
-            '    "race_number" INTEGER NOT NULL,',
-            '    "race_logged_class_name" TEXT NOT NULL,',
-            '    "race_length" TEXT,',
-            '    "race_round" TEXT NOT NULL,',
-            '    "race_class_id" INTEGER NOT NULL,',
-            '    "heat_id" INTEGER NOT NULL',
-            ') STRICT'
-        ].join("\n"),
-
-        [
-            'CREATE TABLE "race_driver" (',
-            '    "race_driver_id" INTEGER PRIMARY KEY,',
-            '    "race_id" INTEGER NOT NULL,',
-            '    "driver_id" INTEGER NOT NULL',
-            ') STRICT'
-        ].join("\n"),
-
-        [
-            'CREATE TABLE "race_driver_laps" (',
-            '    "race_driver_id" INTEGER NOT NULL,',
-            '    "race_driver_laps_lap_number" INTEGER NOT NULL,',
-            '    "race_driver_laps_time_millisecond" INTEGER NOT NULL,',
-            '    "race_driver_laps_position" INTEGER',
-            ') STRICT'
-        ].join("\n"),
+        ...createTables,
 
         [
             'CREATE UNIQUE INDEX "uq_race_driver" ON',
@@ -265,6 +271,8 @@ module.exports = {
     isNodeJS,
     getOneCol,
     genericInsertAndGet,
-    createSchema };
+    createSchema,
+    createTables
+};
 
 

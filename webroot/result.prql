@@ -1,0 +1,194 @@
+prql target:sql.sqlite
+
+let date_to_text = for dat -> s"strftime({for}, {dat})"
+let min_week = '2023-12'
+let max_week = '2023-12'
+
+let event_weeks = (
+    from event
+    derive { event_week = event_date | (date_to_text "%Y-%W") }
+    filter event_week >= min_week
+    filter event_week <= max_week
+    select { event_id, event_week, event_date }
+)
+
+let identify_finals = (
+    from heat
+    join event_weeks ( event_weeks.event_id==heat.event_id )
+    select { heat_id, event_id }
+    group { event_id } (
+        sort { heat_id }
+        derive {
+            is_final = heat_id == max heat_id,
+            heat_seq = row_number this
+        }
+        derive {
+            is_last_qual = heat_seq == 2
+        }
+    )
+)
+
+
+let races = (
+    from race
+    join heat ( race.heat_id == heat.heat_id )
+    join identify_finals ( identify_finals.heat_id == race.heat_id )
+    filter (identify_finals.is_final == 1)
+    select {
+        heat.event_id,
+        race.heat_id,
+        race.race_id,
+        heat.heat_name,
+        race.race_class_id,
+        race.race_number,
+        race.race_logged_class_name,
+        identify_finals.is_final,
+        identify_finals.heat_seq
+    }
+)
+
+let speed_rank = (
+    from race
+    join identify_finals ( identify_finals.heat_id == race.heat_id )
+    group { race.heat_id, race.race_class_id } (
+        sort { -race_number }
+        derive {
+            x_speed_rank = row_number this
+        }
+    )
+    select { this.x_speed_rank, race_id, is_final, is_last_qual, event_id, identify_finals.heat_id, race.race_class_id }
+)
+
+let qual_speed_rank = (
+    from speed_rank
+    filter ( is_last_qual == 1 )
+    select { speed_rank.*, qual_speed_rank = speed_rank.x_speed_rank }
+)
+
+let race_speed_rank = (
+    from speed_rank
+    filter ( is_final == 1 )
+    select { speed_rank.*, race_speed_rank = speed_rank.x_speed_rank }
+)
+
+let qual_speed_rank_driver = (
+    from qual_speed_rank
+    join race_driver ( race_driver.race_id == qual_speed_rank.race_id )
+    select { qual_speed_rank.*, race_driver.driver_id }
+)
+
+let driver_laps_joined = (
+    from race_driver
+    join race ( race_driver.race_id == race.race_id )
+    join race_driver_laps ( race_driver.race_driver_id == race_driver_laps.race_driver_id )
+    select {
+        race_driver.race_id,
+        race_driver.driver_id,
+        race_driver.race_driver_id,
+        race_driver_laps.race_driver_laps_lap_number,
+        race_driver_laps.race_driver_laps_time_millisecond,
+        race_driver_laps_pos = race_driver_laps.race_driver_laps_position,
+    }
+)
+
+let driver_laps_start = (
+    from driver_laps_joined
+    filter (race_driver_laps_lap_number == 0)
+    select {
+        race_id,
+        driver_id,
+        race_start_pos = race_driver_laps_pos,
+    }
+)
+
+
+let driver_laps_finish = (
+    from driver_laps_joined
+    group {race_driver_id} (
+        derive {
+            lap_count = max race_driver_laps_lap_number,
+            total_time = sum race_driver_laps_time_millisecond
+        }
+    )
+    select {
+        race_id,
+        driver_id,
+        lap_count,
+        total_time
+    }
+    group {
+        race_id,
+        driver_id,
+        lap_count,
+        total_time
+    } ( take 1 )
+    group { race_id } (
+        sort { -lap_count, total_time }
+        derive { race_finish_pos = row_number this }
+    )
+    derive {
+        avg_lap_time = total_time / lap_count,
+        # is_winner = ( race_finish_pos == 1 ),
+        # is_second = ( race_finish_pos == 2 ),
+        # is_third = ( race_finish_pos == 3 ),
+    }
+    select {
+        race_finish_pos,
+        lap_count,
+        total_time,
+        avg_lap_time,
+        race_id,
+        driver_id,
+        # is_winner,
+        # is_second,
+        # is_third
+    }
+    sort { -race_id, race_finish_pos }
+)
+
+# from identify_finals
+
+# from driver_laps_start
+# join races ( driver_laps_start.race_id == races.race_id )
+# join driver ( driver_laps_start.driver_id == driver.driver_id )
+# filter (races.is_final == 1 && race_class_id == 1)
+
+let overview = (
+    from driver_laps_finish
+    join races ( driver_laps_finish.race_id == races.race_id )
+    join driver ( driver_laps_finish.driver_id == driver.driver_id )
+    join driver_laps_start ( ( driver_laps_finish.race_id == driver_laps_start.race_id) && ( driver_laps_finish.driver_id == driver_laps_start.driver_id ) )
+    join race_speed_rank ( races.race_id == race_speed_rank.race_id )
+    filter (races.is_final == 1 && races.race_class_id == 1)
+    select { races.race_class_id, races.event_id, races.heat_id, races.race_number, race_logged_class_name, races.race_id, driver.driver_id, driver.driver_name, driver_laps_start.race_start_pos, driver_laps_finish.race_finish_pos, race_speed_rank.race_speed_rank, lap_count, total_time }
+    group { races.heat_id } (
+        sort { -race_number, race_start_pos }
+        derive {
+            heat_start_pos = row_number this
+        }
+        sort { -race_number, race_finish_pos }
+        derive {
+            heat_finish_pos = row_number this
+        }
+        sort { -lap_count, total_time }
+        derive { heat_finish_speed = row_number this }
+    )
+    sort { races.race_class_id }
+)
+
+from overview
+join qual_speed_rank_driver ( ( qual_speed_rank_driver.event_id == overview.event_id ) && ( qual_speed_rank_driver.race_class_id == overview.race_class_id ) && ( qual_speed_rank_driver.driver_id == overview.driver_id) )
+sort { overview.race_class_id, overview.race_speed_rank, overview.race_finish_pos }
+select { overview.*, qual_speed_rank_driver.qual_speed_rank }
+# from qual_speed_rank
+
+# from identify_finals
+# from race_speed_rank
+
+# from qual_speed_rank_driver
+# select race_speed_rank.*
+
+# race_speed_rank, 
+# , driver_laps_start.race_start_pos
+# from races | sort { heat_id, race_number }
+

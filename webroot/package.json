@@ -17,6 +17,8 @@
   },
   "homepage": "https://github.com/forbesmyester/rc_clubs#readme",
   "dependencies": {
+    "md5": "^2.3.0",
+    "prql-js": "^0.11.1",
     "sqlite3": "^5.1.6",
     "walk-directories": "^4.2.1"
   }
